@@ -1,4 +1,6 @@
 #include "os_diff.hpp"
+#include "logging.hpp"
+#include "packet_sender.hpp"
 
 #include <iostream>
 #include <string>
@@ -6,28 +8,21 @@
 #include <map>
 #include <thread>
 #include <atomic>
-
-#include "logging.hpp"
+#include <sstream>
 
 #define DEFAULT_PORT 25565
-#define MESSAGE_BUFFER_LENGTH 1024
 
 typedef void(*Command)(const std::vector<std::string>&);
+struct CommandEntry
+{
+    Command command;
+    std::string usage;
+};
 
 SOCKET main_socket;
-
 std::string username;
-std::map<std::string,Command> m_commands;
-
+std::map<std::string,CommandEntry> m_commands;
 std::atomic<bool> is_running{};
-
-enum INPUT_PARSE_CODE
-{
-    VALID_INPUT = 0,
-    NO_INPUT = -1,
-    BAD_INPUT = -2,
-    NOT_A_COMMAND = 1
-};
 
 std::vector<std::string> split_string(const std::string& input)
 {
@@ -42,25 +37,116 @@ std::vector<std::string> split_string(const std::string& input)
     return output;
 }
 
-INPUT_PARSE_CODE parse_input(const std::string& input)
+bool parse_input(const std::string& input)
 {
     auto cut = split_string(input);
-    if (cut.empty()) return NO_INPUT;
-    if (cut[0].empty()) return NO_INPUT;
-    if (cut[0][0] != '/') return NOT_A_COMMAND;
-    if (cut[0].size() <= 1) return BAD_INPUT;
-    std::string command = cut[0].substr(1);
+    if (cut.empty()) return false;
+    if (cut[0].empty()) return false;
+    if (cut[0][0] != '/') return false;
+    if (cut[0].size() <= 1) return false;
+    std::string entry = cut[0].substr(1);
     cut.erase(cut.begin());
-    if (!m_commands.count(command)) return NOT_A_COMMAND;
-    m_commands.at(command)(cut);
-    
-    return VALID_INPUT;
+    if (!m_commands.count(entry))
+    {
+        CLIENT_MESSAGE("Command Not Found");
+        return false;
+    }
+    m_commands.at(entry).command(cut);
+    return true;
 }
 
-void quit_command(const std::vector<std::string>& param)
+typedef const std::vector<std::string>& PARAMETERS;
+
+void quit_command(PARAMETERS param)
 {
     is_running.store(false);
     CLIENT_MESSAGE("Quitting");
+    PACMAN::send_message(main_socket,DISCONNECT,"A");
+}
+
+void help_command(PARAMETERS param)
+{
+    if (param.empty())
+    {
+        CLIENT_MESSAGE("Commands:");
+        for (const auto& command : m_commands)
+            CLIENT_MESSAGE('/' << command.first);
+    }
+    else
+    {
+        if (!m_commands.count(param[0]))
+        {
+            CLIENT_MESSAGE("Invalid Parameters for /help. See /help without parameters for more commands.");
+            return;
+        }
+        CLIENT_MESSAGE(m_commands.at(param[0]).usage);
+    }
+}
+
+void joinroom_command(PARAMETERS param)
+{
+    if (param.empty())
+    {
+        CLIENT_MESSAGE("Join Room requires the name of the room. See /help for more commands.");
+        return;
+    }
+    PACMAN::send_message(main_socket,JOIN_ROOM,param[0]);
+}
+
+void authenticate_command(PARAMETERS param)
+{
+    if (param.empty())
+    {
+        CLIENT_MESSAGE("AUTHENTICATION requires an authentication code. See /help for more commands.");
+        return;
+    }
+    PACMAN::send_message(main_socket,AUTHENTICATE,param[0]);
+}
+
+void friend_command(PARAMETERS param)
+{
+    if (param.empty())
+    {
+        CLIENT_MESSAGE("You need to provide somebody's name to befriend.");
+        return;
+    }
+    PACMAN::send_message(main_socket,FRIEND_REQUEST,param[0]);
+}
+
+void list_command(PARAMETERS param)
+{
+    PACMAN::send_message(main_socket,ROOM_LIST,"A");
+}
+
+void friendslist_command(PARAMETERS param)
+{
+    PACMAN::send_message(main_socket,FRIENDS_LIST,"A");
+}
+
+void whisper_command(PARAMETERS param)
+{
+    if (param.empty())
+    {
+        CLIENT_MESSAGE("You need to provide a user and a message to whipser");
+        return;
+    }
+    std::stringstream packet;
+    for (const auto& p : param)
+        packet << p << ' ';
+    PACMAN::send_message(main_socket,WHISPER,packet.str());
+}
+
+void shutoff_command(PARAMETERS param)
+{
+    PACMAN::send_message(main_socket,ADMIN_SHUTOFF,"A");
+}
+
+void announce_command(PARAMETERS param)
+{
+    std::stringstream msg;
+    for (const auto& p : param)
+        msg << p << ' ';
+    PACMAN::send_message(main_socket,ADMIN_ANNOUNCE,msg.str());
 }
 
 int main(const int argc, char* argv[])
@@ -74,15 +160,86 @@ int main(const int argc, char* argv[])
     username = argv[1];
 
     // Load Commands
-    m_commands.insert(std::make_pair(
-        "help",
-        [](const std::vector<std::string>& param)
-        {
-            CLIENT_MESSAGE("Commands:");
-            for (const auto& command : m_commands)
-                CLIENT_MESSAGE('/' << command.first);
-        } ));
-    m_commands.insert(std::make_pair("quit", quit_command));
+    m_commands.insert(std::make_pair("help",
+                                     CommandEntry{
+                                             help_command,
+                                             "/help [COMMAND]\n"
+                                             "Prints out all possible commands or how to use one\n"
+                                             "Example:\n"
+                                             "/help quit"
+                                     }));
+    m_commands.insert(std::make_pair("quit",
+                                     CommandEntry{
+                                             quit_command,
+                                             "/quit\n"
+                                             "Disconnects from the server and closes the client\n"
+                                             "Example:\n"
+                                             "/quit"
+                                     }));
+    m_commands.insert(std::make_pair("join",
+                                     CommandEntry{
+                                             joinroom_command,
+                                             "/join [ROOMNAME]\n"
+                                             "Join a different Chatroom\n"
+                                             "Example:\n"
+                                             "/join HOMEROOM"
+                                     }));
+    m_commands.insert(std::make_pair("auth",
+                                     CommandEntry{
+                                             authenticate_command,
+                                             "/auth [PASSWORD]\n"
+                                             "Authenticates yourself with the server for Administrator Privileges\n"
+                                             "Example:\n"
+                                             "/auth victorwee"
+                                     }));
+    m_commands.insert(std::make_pair("friend",
+                                     CommandEntry{
+                                             friend_command,
+                                             "/friend [USERNAME]\n"
+                                             "Requests to be somebody's friend or accept somebody's request\n"
+                                             "Example:\n"
+                                             "/friend chiansong"
+                                     }));
+    m_commands.insert(std::make_pair("flist",
+                                     CommandEntry{
+                                             friendslist_command,
+                                             "/flist\n"
+                                             "Shows your list of friends and incoming requests\n"
+                                             "Example:\n"
+                                             "/flist"
+                                     }));
+    m_commands.insert(std::make_pair("list",
+                                     CommandEntry{
+                                             list_command,
+                                             "/list\n"
+                                             "Shows everybody in the same room\n"
+                                             "Example:\n"
+                                             "/list"
+                                     }));
+    m_commands.insert(std::make_pair("whisper",
+                                     CommandEntry{
+                                             whisper_command,
+                                             "/whisper [USERNAME]\n"
+                                             "Sends a private message across the server\n"
+                                             "Example:\n"
+                                             "/whisper michael_jordon hello there michael jordon"
+                                     }));
+    m_commands.insert(std::make_pair("shutdown",
+                                     CommandEntry{
+                                             shutoff_command,
+                                             "/shutdown\n"
+                                             "Shuts down the server. You must be an administator to do this action\n"
+                                             "Example:\n"
+                                             "/shutdown"
+                                     }));
+    m_commands.insert(std::make_pair("announce",
+                                     CommandEntry{
+                                             announce_command,
+                                             "/announce [MESSAGE]\n"
+                                             "Announces a message to everyone in the server. You must be an administator to do this action\n"
+                                             "Example:\n"
+                                             "/announce hi everybody"
+                                     }));
 
     int result = 0;
     LOG_INFO("Starting Up Client");
@@ -92,8 +249,16 @@ int main(const int argc, char* argv[])
     const char* server_address = "127.0.0.1";
     if (argc > 2)
     {
-        port = std::stoi(argv[2]);
-        LOG_INFO("Custom Port | " << port);
+        try
+        {
+            port = std::stoi(argv[2]);
+            LOG_INFO("Custom Port | " << port);
+        } catch (const std::exception& e)
+        {
+            LOG_WARNING(argv[2] << " is an invalid port value");
+            LOG_WARNING("Defaulting to port 25565");
+            port = DEFAULT_PORT;
+        }
         if (port > std::numeric_limits<uint16_t>::max())
         {
             LOG_ERROR("Port exceeds the port range 0-65536");
@@ -132,7 +297,16 @@ int main(const int argc, char* argv[])
         WINSOCK_CLEANUP;
         return EXIT_FAILURE;
     }
-    LOG_INFO("Connected To " << server_address);
+    CLIENT_MESSAGE("Connected To " << server_address);
+    LOG_INFO("Uploading Username");
+    int username_send_result = send(main_socket,username.c_str(),username.size(),0);
+    if (username_send_result < 0)
+    {
+        LOG_ERROR("Failure when sending Username to Server | " << GET_LAST_ERROR);
+        CLOSE_SOCKET(main_socket);
+        WINSOCK_CLEANUP;
+        return EXIT_FAILURE;
+    }
 
     std::thread input_thread(
         [&]
@@ -140,34 +314,24 @@ int main(const int argc, char* argv[])
             while (is_running.load())
             {
                 std::string input;
-                std::cin >> input;
-                auto code = parse_input(input);
-                switch (code)
-                {
-                case BAD_INPUT:
-                    CLIENT_MESSAGE("No Command Detected");
-                    break;
-                case NO_INPUT:
-                    CLIENT_MESSAGE("TODO Do message sending");
-                    break;
-                case NOT_A_COMMAND:
-                    CLIENT_MESSAGE("Not A Command");
-                    break;
-                default:
-                    break;
-                }
+                std::getline(std::cin,input);
+                if (input.empty()) continue;
+                if (parse_input(input)) continue;
+                PACMAN::send_message(main_socket,MESSAGE,input);
             }
         });
 
     bool exit_code = EXIT_SUCCESS;
     while (is_running.load())
     {
-        timeval timeout;
+        // Initialize Network Variables
+        timeval timeout{};
         timeout.tv_sec = 1;
         timeout.tv_usec = 0;
         fd_set server_connection;
         FD_ZERO(&server_connection);
         FD_SET(main_socket,&server_connection);
+
         const int select_result = select(0,&server_connection,nullptr,nullptr,&timeout);
         if (0 > select_result)
         {
@@ -176,26 +340,51 @@ int main(const int argc, char* argv[])
             goto EXIT_POINT;
         }
         if (0 == select_result) continue; // Timeout
-        char message_buffer[MESSAGE_BUFFER_LENGTH]{'\0'};
-        const ssize_t receive_length = recv(main_socket,message_buffer,MESSAGE_BUFFER_LENGTH,0);
-        if (!receive_length)
+
+//        char message_buffer[MESSAGE_BUFFER_LENGTH]{'\0'};
+//        const int receive_length = recv(main_socket,message_buffer,MESSAGE_BUFFER_LENGTH,0);
+//        if (!receive_length)
+//        {
+//            LOG_INFO("Server Closed On Their Side");
+//            is_running.store(false);
+//            break;
+//        }
+//        if (receive_length < 0)
+//        {
+//            LOG_ERROR("recv() Error | ERROR: " << GET_LAST_ERROR);
+//            goto EXIT_POINT;
+//        }
+
+        std::string from_server;
+        const PACMAN::RECV_RETURN_CODE recv_result = PACMAN::receive_message(main_socket,from_server);
+
+        switch (recv_result)
         {
-            LOG_INFO("Server Closed On Their Side");
-            break;
+            case PACMAN::RECV_RETURN_CODE::RECV_ERROR:
+            {
+                LOG_WARNING("Server Connection Suddenly Terminated | ERROR: " << GET_LAST_ERROR);
+                goto EXIT_POINT;
+            }
+            case PACMAN::RECV_RETURN_CODE::RECV_ZERO_LEN:
+            {
+                SERVER_MESSAGE("Server has terminated the connection on their side");
+                is_running.store(false);
+                continue;
+            }
+            case PACMAN::RECV_RETURN_CODE::RECV_GOOD:
+                break;
         }
-        if (receive_length < 0)
-        {
-            LOG_ERROR("recv() Error | ERROR: " << GET_LAST_ERROR);
-            goto EXIT_POINT;
-        }
-        SERVER_MESSAGE(message_buffer); // Replace with TAG_MESSAGE and username
+
+        std::cout << from_server.c_str()+1 << std::endl;
     }
 
-    // Interupt Thread and Join
+EXIT_POINT:
+    // Interrupt Thread and Join
     LOG_INFO("Waiting To Join Input Thread");
+    is_running.store(false);
+    std::cin.putback('\r');
     input_thread.join();
 
-EXIT_POINT:
     LOG_INFO("Client Closing");
     CLOSE_SOCKET(main_socket);
     WINSOCK_CLEANUP;

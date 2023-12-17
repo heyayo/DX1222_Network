@@ -1,6 +1,10 @@
 #ifndef OS_DIFF_HPP
 #define OS_DIFF_HPP
 
+/*
+ * LINUX SUPPORT HAS CEASED BECAUSE THE ASSIGNMENT IS DUE SOON
+ */
+
 #ifdef _WIN32
 
 #define WIN32_LEAN_AND_MEAN
@@ -8,19 +12,20 @@
 #define NOMINMAX
 #pragma comment(lib,"Ws2_32.lib")
 
-#include <winsock2.h>
-#include <ws2tcpip.h>
+#include <WinSock2.h>
+#include <WS2tcpip.h>
 
 #define CLOSE_SOCKET(socket) closesocket(socket)
-#define WINSOCK_CLEANUP WSACleanUp()
+#define WINSOCK_CLEANUP WSACleanup()
 #define WINSOCK_LINK \
-WSAData data;\
-result = WSAStartup(MAKEWORD(2,2),&wsa_data);\
+WSAData data{};\
+result = WSAStartup(MAKEWORD(2,2),&data);\
 if (result != 0)\
 {\
     LOG_ERROR("WSAStartup Failure");\
     return EXIT_FAILURE;\
-}\
+}
+
 #define GET_LAST_ERROR WSAGetLastError()
 
 typedef int sockaddr_length;

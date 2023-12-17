@@ -5,8 +5,9 @@
 #define LOG_WARNING(msg) std::cout << "[WARN] " << msg << std::endl
 #define LOG_INFO(msg) std::cout << "[INFO] " << msg << std::endl
 
-#define TAG_MESSAGE(msg, tag) std::cout << "\["#tag"\] " << msg << std::endl
+#define TAG_MESSAGE(msg, tag) std::cout << "["#tag"] " << msg << std::endl
 #define SERVER_MESSAGE(msg) TAG_MESSAGE(msg,SERVER)
 #define CLIENT_MESSAGE(msg) TAG_MESSAGE(msg,CLIENT)
+#define USER_MESSAGE(msg,name) std::cout << '[' << name << "] " << msg << std::endl;
 
 #endif // LOGGING_HPP
