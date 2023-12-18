@@ -10,6 +10,7 @@
 #include <queue>
 #include <limits>
 #include <algorithm>
+#include <logging.hpp>
 #include <sstream>
 
 #define TCP_BACKLOG 10
