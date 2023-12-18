@@ -44,7 +44,7 @@ typedef int sockaddr_length;
 #define WINSOCK_LINK
 #define GET_LAST_ERROR strerror(errno)
 
-typedef int SOCKET;
+typedef unsigned long long SOCKET;
 typedef socklen_t sockaddr_length;
 
 #endif

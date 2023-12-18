@@ -7,7 +7,7 @@
 #include <vector>
 
 // To get the word SOCKET
-typedef unsigned __int64 SOCKET;
+typedef unsigned long long SOCKET;
 
 namespace PACMAN
 {

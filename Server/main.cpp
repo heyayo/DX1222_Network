@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <logging.hpp>
 #include <sstream>
+#include <memory>
 
 #define TCP_BACKLOG 10
 #define DEFAULT_PORT 25565

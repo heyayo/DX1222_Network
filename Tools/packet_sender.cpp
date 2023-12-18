@@ -4,6 +4,7 @@
 
 #include <sstream>
 #include <iostream>
+#include <algorithm>
 
 namespace PACMAN
 {
